@@ -103,7 +103,7 @@ async def async_setup_entry(
                 trap_id, frame.is_tripped, frame.model
             )
             sensors[trap_id] = entity
-            async_add_entities([entity], update_before_add=True)
+            async_add_entities([entity])
 
             @callback
             def unavailable_callback(_service_info, trap_id=trap_id):

@@ -15,6 +15,8 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(hacs["name"], "SWISSINNO BLE")
         self.assertTrue(hacs["zip_release"])
         self.assertEqual(hacs["filename"], "swissinno_ble.zip")
+        # The every-advertisement callback arrived in Home Assistant 2026.10.
+        self.assertEqual(hacs["homeassistant"], "2026.10.0")
         self.assertFalse((INTEGRATION / "hacs.json").exists())
 
         release_workflow = (

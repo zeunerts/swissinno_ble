@@ -18,6 +18,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from .battery import BatteryStabilizer
 from .const import DATA_COORDINATOR, DOMAIN, entity_unique_id, legacy_unique_ids
 from .coordinator import TrapObservation, TrapObservationCoordinator
+from .entity import PublishWhenAdded
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ def _migrate_legacy_unique_id(
             return
 
 
-class SwissinnoBatterySensor(SensorEntity):
+class SwissinnoBatterySensor(PublishWhenAdded, SensorEntity):
     """Battery voltage sensor."""
 
     _attr_device_class = SensorDeviceClass.VOLTAGE
@@ -183,15 +184,15 @@ class SwissinnoBatterySensor(SensorEntity):
     def update_value(self, value: float | None):
         self._attr_native_value = value
         self._attr_available = True
-        self.async_write_ha_state()
+        self._publish_state()
 
     @callback
     def set_unavailable(self) -> None:
         self._attr_available = False
-        self.async_write_ha_state()
+        self._publish_state()
 
 
-class SwissinnoRSSISensor(SensorEntity):
+class SwissinnoRSSISensor(PublishWhenAdded, SensorEntity):
     """RSSI sensor."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
@@ -213,15 +214,15 @@ class SwissinnoRSSISensor(SensorEntity):
     def update_value(self, rssi: int | None):
         self._attr_native_value = rssi
         self._attr_available = True
-        self.async_write_ha_state()
+        self._publish_state()
 
     @callback
     def set_unavailable(self) -> None:
         self._attr_available = False
-        self.async_write_ha_state()
+        self._publish_state()
 
 
-class SwissinnoLastSeenSensor(SensorEntity):
+class SwissinnoLastSeenSensor(PublishWhenAdded, SensorEntity):
     """Timestamp of the most recent fresh trap advertisement."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -239,10 +240,10 @@ class SwissinnoLastSeenSensor(SensorEntity):
 
     def update_value(self, last_seen: datetime) -> None:
         self._attr_native_value = last_seen
-        self.async_write_ha_state()
+        self._publish_state()
 
 
-class SwissinnoLastTriggeredSensor(SensorEntity):
+class SwissinnoLastTriggeredSensor(PublishWhenAdded, SensorEntity):
     """Timestamp of the most recent confirmed trigger transition."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -264,10 +265,10 @@ class SwissinnoLastTriggeredSensor(SensorEntity):
         if self._attr_native_value == last_triggered:
             return
         self._attr_native_value = last_triggered
-        self.async_write_ha_state()
+        self._publish_state()
 
 
-class SwissinnoTriggerCountSensor(SensorEntity):
+class SwissinnoTriggerCountSensor(PublishWhenAdded, SensorEntity):
     """Count confirmed trigger transitions observed by Home Assistant."""
 
     _attr_has_entity_name = True
@@ -287,4 +288,4 @@ class SwissinnoTriggerCountSensor(SensorEntity):
         if self._attr_native_value == trigger_count:
             return
         self._attr_native_value = trigger_count
-        self.async_write_ha_state()
+        self._publish_state()

@@ -380,11 +380,14 @@ class FakeEntityRegistry:
         # (domain, platform, unique_id) -> entity_id
         self.entries: dict[tuple[str, str, str], str] = {}
         self.updates: list[tuple[str, str]] = []
+        # Every (domain, platform, unique_id) looked up, in order.
+        self.lookups: list[tuple[str, str, str]] = []
 
     def add(self, domain: str, platform: str, unique_id: str, entity_id: str):
         self.entries[(domain, platform, unique_id)] = entity_id
 
     def async_get_entity_id(self, domain, platform, unique_id):
+        self.lookups.append((domain, platform, unique_id))
         return self.entries.get((domain, platform, unique_id))
 
     def async_update_entity(self, entity_id, *, new_unique_id=None, **_kwargs):

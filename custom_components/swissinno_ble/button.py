@@ -53,6 +53,9 @@ async def async_setup_entry(
         address = service_info.address
         trap_id = normalized_address(address)
 
+        if trap_id in buttons:
+            return
+
         # Versions before 1.0.16 used changing advertisement bytes in the
         # reset button unique ID. Migrate the currently discoverable ID.
         unique_id = entity_unique_id(address, "reset")
@@ -68,9 +71,6 @@ async def async_setup_entry(
                         legacy_entity_id, new_unique_id=unique_id
                     )
                     break
-
-        if trap_id in buttons:
-            return
 
         _LOGGER.info(
             "SWISSINNO BLE: Adding Reset Trap button for %s (%s)",

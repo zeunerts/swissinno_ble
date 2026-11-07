@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .const import STATUS_READY, STATUS_TRIGGERED
+
 NEW_FRAME_MIN_LEN = 10
 CONNECT_TRAP_MARKER = 0x01
 ELECTRONIC_TRAP_MARKER = 0x02
-MANUFACTURER_ID = 3003
-STATUS_READY = 0x00
-STATUS_TRIGGERED = 0x01
 MODEL_CONNECT_SUPERCAT = "Connect SuperCat"
 MODEL_ELECTRONIC_SUPERCAT = "Electronic SuperCat"
 MODEL_LEGACY_SUPERCAT = "SuperCat (legacy protocol)"
@@ -133,9 +132,7 @@ def decode_frame(payload: bytes) -> DecodedTrapFrame | None:
     # ----------------------------------------------------------------------
     version = -1
 
-    trap_id = (
-        "".join(f"{b:02X}" for b in payload[2:6]) if len(payload) >= 6 else "UNKNOWN"
-    )
+    trap_id = _hex_id(payload[2:6])
 
     status = payload[0]
 

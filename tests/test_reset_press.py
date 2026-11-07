@@ -87,6 +87,54 @@ class ResetPressTests(unittest.TestCase):
         self.assertIn(TRAP_ADDRESS, message)
         self.assertIn("No backend with an available connection slot", message)
 
+    def test_write_failure_raises_readable_error_and_disconnects(self):
+        self.advertise()
+        self.client.write_gatt_char.side_effect = BleakError("Disconnected")
+
+        with self.assertRaises(HomeAssistantError) as raised:
+            self.ha.press(RESET_BUTTON)
+
+        self.assertEqual(raised.exception.translation_key, "reset_write_failed")
+        message = english_message(raised.exception)
+        self.assertIn(TRAP_ADDRESS, message)
+        self.assertIn("Disconnected", message)
+        self.client.disconnect.assert_awaited_once()
+
+    def test_missing_reset_characteristic_raises_readable_error_and_disconnects(self):
+        self.advertise()
+        self.client.services.get_characteristic.return_value = None
+
+        with self.assertRaises(HomeAssistantError) as raised:
+            self.ha.press(RESET_BUTTON)
+
+        self.assertEqual(
+            raised.exception.translation_key, "reset_characteristic_missing"
+        )
+        self.assertIn(TRAP_ADDRESS, english_message(raised.exception))
+        self.client.write_gatt_char.assert_not_awaited()
+        self.client.disconnect.assert_awaited_once()
+
+    def test_read_only_reset_characteristic_raises_readable_error(self):
+        self.advertise()
+        self.characteristic.properties = ["read", "notify"]
+
+        with self.assertRaises(HomeAssistantError) as raised:
+            self.ha.press(RESET_BUTTON)
+
+        self.assertEqual(
+            raised.exception.translation_key, "reset_characteristic_not_writable"
+        )
+        self.assertIn(TRAP_ADDRESS, english_message(raised.exception))
+        self.client.disconnect.assert_awaited_once()
+
+    def test_disconnect_failure_after_reset_is_not_an_error(self):
+        self.advertise()
+        self.client.disconnect.side_effect = BleakError("Already disconnected")
+
+        self.ha.press(RESET_BUTTON)
+
+        self.client.write_gatt_char.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

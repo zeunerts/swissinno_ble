@@ -53,6 +53,15 @@
     },
     "reset_connection_failed": {
       "message": "Could not connect to Trap {address} for the Reset: {error}. Try the Reset again."
+    },
+    "reset_write_failed": {
+      "message": "Could not send the Reset to Trap {address}: {error}. Try the Reset again."
+    },
+    "reset_characteristic_missing": {
+      "message": "Trap {address} does not offer the Reset characteristic. This Trap may not support Reset from Home Assistant."
+    },
+    "reset_characteristic_not_writable": {
+      "message": "The Reset characteristic of Trap {address} is not writable (properties: {properties})."
     }
   }
 }

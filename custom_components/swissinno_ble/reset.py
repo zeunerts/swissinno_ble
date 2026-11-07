@@ -24,11 +24,7 @@ async def async_reset_trap(hass, address: str) -> None:
 
     device = async_ble_device_from_address(hass, normalized, connectable=True)
     if device is None:
-        raise HomeAssistantError(
-            translation_domain=DOMAIN,
-            translation_key="reset_no_connectable_device",
-            translation_placeholders={"address": normalized},
-        )
+        raise _reset_error("reset_no_connectable_device", normalized)
 
     try:
         client = await establish_connection(
@@ -37,18 +33,14 @@ async def async_reset_trap(hass, address: str) -> None:
             device.name or normalized,
         )
     except (BleakError, TimeoutError) as err:
-        raise HomeAssistantError(
-            translation_domain=DOMAIN,
-            translation_key="reset_connection_failed",
-            translation_placeholders={"address": normalized, "error": str(err)},
+        raise _reset_error(
+            "reset_connection_failed", normalized, error=str(err)
         ) from err
 
     try:
         characteristic = client.services.get_characteristic(RESET_CHARACTERISTIC_UUID)
         if characteristic is None:
-            raise RuntimeError(
-                f"Reset characteristic {RESET_CHARACTERISTIC_UUID} not found"
-            )
+            raise _reset_error("reset_characteristic_missing", normalized)
 
         properties = set(characteristic.properties)
         if "write-without-response" in properties:
@@ -56,11 +48,29 @@ async def async_reset_trap(hass, address: str) -> None:
         elif "write" in properties:
             response = True
         else:
-            raise RuntimeError(
-                f"Reset characteristic is not writable (properties: {sorted(properties)})"
+            raise _reset_error(
+                "reset_characteristic_not_writable",
+                normalized,
+                properties=", ".join(sorted(properties)) or "none",
             )
 
-        await client.write_gatt_char(characteristic, b"\x00", response=response)
+        try:
+            await client.write_gatt_char(characteristic, b"\x00", response=response)
+        except (BleakError, TimeoutError) as err:
+            raise _reset_error("reset_write_failed", normalized, error=str(err)) from err
         _LOGGER.info("SWISSINNO BLE: Successfully reset trap %s", normalized)
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except (BleakError, TimeoutError) as err:
+            _LOGGER.debug(
+                "SWISSINNO BLE: Disconnect from trap %s failed: %s", normalized, err
+            )
+
+
+def _reset_error(key: str, address: str, **placeholders: str) -> HomeAssistantError:
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key=key,
+        translation_placeholders={"address": address, **placeholders},
+    )

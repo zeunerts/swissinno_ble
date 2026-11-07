@@ -7,7 +7,9 @@ The fake modules live in ``sys.modules`` only while a harness is open.
 The Bluetooth fake follows Home Assistant 2026.10+ / habluetooth 7.x:
 
 - Every-advertisement callbacks fire for every packet from every scanner,
-  before any history update or deduplication.
+  before any history update or deduplication. Work they defer with
+  ``hass.loop.call_soon`` runs once the packet has been processed, before
+  ``feed_advertisement`` returns, as the event loop would run it.
 - Each history (all, connectable) keeps one entry per address, from the
   source that wins arbitration: same source, a much stronger signal, or the
   previous winner went stale. A packet that loses arbitration is dropped.
@@ -43,9 +45,14 @@ INTEGRATION_DIR = (
 PACKAGE = "custom_components.swissinno_ble"
 PLATFORMS = ("binary_sensor", "sensor", "button")
 
-# habluetooth defaults for switching the history entry to another source.
+# habluetooth 7.1.2 (const.py) values for switching the history entry to
+# another source. ADV_RSSI_SWITCH_THRESHOLD: a different receiver must be this
+# many dB stronger. FALLBACK_MAXIMUM_STALE_ADVERTISEMENT_SECONDS: without a
+# tracked advertisement interval, a silent owner loses to any receiver only
+# after this long. RSSI smoothing, the demotion deadband and interval-based
+# stale roaming are not modelled; tests must not depend on them.
 RSSI_SWITCH_THRESHOLD = 16
-STALE_ADVERTISEMENT_SECONDS = 195
+STALE_ADVERTISEMENT_SECONDS = 15 * 60
 
 
 # --- Bluetooth --------------------------------------------------------------
@@ -560,6 +567,8 @@ class HomeAssistantHarness:
             time=time.monotonic() if received_at is None else received_at,
         )
         self.bluetooth.receive(info)
+        # Let the event loop run callbacks scheduled while handling the packet.
+        self.run(asyncio.sleep(0))
         return info
 
     def fire_unavailable(self, address: str) -> bool:

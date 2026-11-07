@@ -2,22 +2,33 @@
 
 import importlib.util
 import sys
+import types
 import unittest
 from pathlib import Path
 
 COMPONENT_DIR = Path(__file__).parents[1] / "custom_components" / "swissinno_ble"
+PACKAGE = "swissinno_ble_decoder_tests"
+
+# Register a bare package so the decoder's relative imports resolve without
+# running the integration's __init__ (which needs Home Assistant).
+_package = types.ModuleType(PACKAGE)
+_package.__path__ = [str(COMPONENT_DIR)]
+sys.modules[PACKAGE] = _package
 
 
 def load_module(name: str):
-    spec = importlib.util.spec_from_file_location(name, COMPONENT_DIR / f"{name}.py")
+    qualified_name = f"{PACKAGE}.{name}"
+    spec = importlib.util.spec_from_file_location(
+        qualified_name, COMPONENT_DIR / f"{name}.py"
+    )
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[qualified_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-decoder = load_module("decoder")
 const = load_module("const")
+decoder = load_module("decoder")
 
 
 class DecoderTests(unittest.TestCase):

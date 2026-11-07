@@ -241,23 +241,13 @@ class MetadataTests(unittest.TestCase):
         self.assertIn('manufacturer_payload=%s', binary_source)
         self.assertIn('payload.hex(" ").upper()', binary_source)
 
-    def test_repeated_manufacturer_advertisements_are_delivered(self):
-        binary_source = (INTEGRATION / "binary_sensor.py").read_text(
-            encoding="utf-8"
-        )
+    def test_bluetooth_matcher_accepts_non_connectable_receivers(self):
         manifest = json.loads(
             (INTEGRATION / "manifest.json").read_text(encoding="utf-8")
         )
         self.assertEqual(
             manifest["bluetooth"],
             [{"connectable": False, "manufacturer_id": 3003}],
-        )
-        self.assertIn("async_clear_advertisement_history", binary_source)
-        self.assertGreaterEqual(
-            binary_source.count(
-                "_clear_advertisement_history(hass, service_info.address)"
-            ),
-            2,
         )
 
     def test_entities_have_stable_explicit_icons(self):

@@ -38,51 +38,23 @@ async def async_setup_entry(
     _LOGGER.info("SWISSINNO BLE: Registering Bluetooth scanner callback...")
 
     sensors: dict[str, SwissinnoTrapSensor] = {}
+    known_traps: set[str] = set()
     entity_registry = er.async_get(hass)
     coordinator: TrapObservationCoordinator = hass.data[DOMAIN][DATA_COORDINATOR]
     accept_after = monotonic()
 
     @callback
-    def detection_callback(service_info: BluetoothServiceInfoBleak, change):
-        """Handle BLE advertisements."""
-        if not is_fresh_advertisement(service_info.time, accept_after):
-            _LOGGER.debug(
-                "Ignoring cached advertisement for %s from before integration setup",
-                service_info.address,
-            )
-            _clear_advertisement_history(hass, service_info.address)
+    def handle_advertisement(service_info: BluetoothServiceInfoBleak) -> None:
+        """Publish Status, battery, signal strength and Last seen of a Trap."""
+        payload = service_info.manufacturer_data.get(MANUFACTURER_ID)
+        if payload is None:
             return
-
-        man = service_info.manufacturer_data
-        if MANUFACTURER_ID not in man:
-            return
-
-        payload = man[MANUFACTURER_ID]
         frame = decode_frame(payload)
         if not frame:
             return
 
         trap_id = normalized_address(service_info.address)
         rssi = service_info.rssi
-
-        # Versions before 1.0.16 used manufacturer-data bytes in the unique ID.
-        # Preserve the user's existing entity_id when the MAC-based identity is
-        # not already registered. Existing duplicate entities are left alone so
-        # Home Assistant configuration is never destructively rewritten.
-        old_unique_ids = legacy_unique_ids(frame.legacy_trap_ids)
-        unique_id = entity_unique_id(service_info.address)
-        if not entity_registry.async_get_entity_id(
-            "binary_sensor", DOMAIN, unique_id
-        ):
-            for legacy_unique_id in old_unique_ids:
-                legacy_entity_id = entity_registry.async_get_entity_id(
-                    "binary_sensor", DOMAIN, legacy_unique_id
-                )
-                if legacy_entity_id:
-                    entity_registry.async_update_entity(
-                        legacy_entity_id, new_unique_id=unique_id
-                    )
-                    break
 
         _LOGGER.debug(
             "Trap %s (%s): status=0x%02X, tripped=%s, RSSI=%s dBm, "
@@ -105,20 +77,6 @@ async def async_setup_entry(
             sensors[trap_id] = entity
             async_add_entities([entity])
 
-            @callback
-            def unavailable_callback(_service_info, trap_id=trap_id):
-                sensors[trap_id].set_unavailable()
-                coordinator.set_unavailable(trap_id)
-
-            entry.async_on_unload(
-                async_track_unavailable(
-                    hass,
-                    unavailable_callback,
-                    service_info.address,
-                    connectable=False,
-                )
-            )
-
         # Cache before publishing so sensor setup can safely finish after the
         # synchronous Bluetooth history replay performed during registration.
         coordinator.update(
@@ -132,7 +90,80 @@ async def async_setup_entry(
             ),
             is_tripped=frame.is_tripped,
         )
-        _clear_advertisement_history(hass, service_info.address)
+
+    @callback
+    def track_trap(service_info: BluetoothServiceInfoBleak, frame) -> None:
+        """Start following a newly discovered Trap."""
+        trap_id = normalized_address(service_info.address)
+
+        # Versions before 1.0.16 used manufacturer-data bytes in the unique ID.
+        # Preserve the user's existing entity_id when the MAC-based identity is
+        # not already registered. Existing duplicate entities are left alone so
+        # Home Assistant configuration is never destructively rewritten.
+        old_unique_ids = legacy_unique_ids(frame.legacy_trap_ids)
+        unique_id = entity_unique_id(service_info.address)
+        if not entity_registry.async_get_entity_id(
+            "binary_sensor", DOMAIN, unique_id
+        ):
+            for legacy_unique_id in old_unique_ids:
+                legacy_entity_id = entity_registry.async_get_entity_id(
+                    "binary_sensor", DOMAIN, legacy_unique_id
+                )
+                if legacy_entity_id:
+                    entity_registry.async_update_entity(
+                        legacy_entity_id, new_unique_id=unique_id
+                    )
+                    break
+
+        @callback
+        def unavailable_callback(_service_info) -> None:
+            if trap_id in sensors:
+                sensors[trap_id].set_unavailable()
+            coordinator.set_unavailable(trap_id)
+
+        # Home Assistant fires this callback for every advertisement from every
+        # receiver, including unchanged repeats the matcher callback never sees.
+        entry.async_on_unload(
+            bluetooth.async_register_advertisement_callback(
+                hass, handle_advertisement, service_info.address
+            )
+        )
+        entry.async_on_unload(
+            async_track_unavailable(
+                hass,
+                unavailable_callback,
+                service_info.address,
+                connectable=False,
+            )
+        )
+
+    @callback
+    def detection_callback(service_info: BluetoothServiceInfoBleak, change):
+        """Discover Traps from changed advertisements."""
+        payload = service_info.manufacturer_data.get(MANUFACTURER_ID)
+        if payload is None:
+            return
+        frame = decode_frame(payload)
+        if not frame:
+            return
+
+        trap_id = normalized_address(service_info.address)
+        if trap_id in known_traps:
+            # The every-advertisement callback already handled this one.
+            return
+        known_traps.add(trap_id)
+        track_trap(service_info, frame)
+
+        if not is_fresh_advertisement(service_info.time, accept_after):
+            _LOGGER.debug(
+                "Ignoring cached advertisement for %s from before integration setup",
+                service_info.address,
+            )
+            return
+
+        # The every-advertisement callback was registered after this
+        # advertisement arrived, so handle it here once.
+        handle_advertisement(service_info)
 
     cancel_callback = async_register_callback(
         hass,
@@ -144,14 +175,6 @@ async def async_setup_entry(
     entry.async_on_unload(cancel_callback)
 
     _LOGGER.info("SWISSINNO BLE: Bluetooth scanner callback registered.")
-
-
-def _clear_advertisement_history(hass: HomeAssistant, address: str) -> None:
-    """Ensure the next identical trap advertisement reaches the callback."""
-    if clear_history := getattr(
-        bluetooth, "async_clear_advertisement_history", None
-    ):
-        clear_history(hass, address)
 
 
 class SwissinnoTrapSensor(BinarySensorEntity):

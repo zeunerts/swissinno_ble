@@ -1,7 +1,10 @@
 """Behaviour tests: the Trap stays in Home Assistant's Bluetooth history."""
 
+import sys
 import time
 import unittest
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from ha_harness import HomeAssistantHarness
 
@@ -53,13 +56,67 @@ class BluetoothHistoryTests(unittest.TestCase):
 
         self.assertEqual(self.ha.state(unique_id("battery")).state, "3.08")
 
+    def set_clock(self, now):
+        """Fix the wall clock the integration stamps Last seen with."""
+        binary_sensor = sys.modules["custom_components.swissinno_ble.binary_sensor"]
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+
+        patcher = patch.object(binary_sensor, "datetime", Clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_last_seen_advances_on_unchanged_repeat_advertisement(self):
+        start = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        self.set_clock(start)
         self.advertise()
-        first = self.ha.state(unique_id("last_seen")).state
-        time.sleep(0.01)
+        self.set_clock(start + timedelta(seconds=61))
         self.advertise()
 
-        self.assertGreater(self.ha.state(unique_id("last_seen")).state, first)
+        self.assertEqual(
+            self.ha.state(unique_id("last_seen")).state,
+            (start + timedelta(seconds=61)).isoformat(),
+        )
+
+    def test_last_seen_is_written_at_most_once_a_minute(self):
+        start = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        for seconds in range(0, 60, 2):
+            self.set_clock(start + timedelta(seconds=seconds))
+            self.advertise(source="attic-proxy", rssi=-58)
+            self.advertise(source="shelly", rssi=-79, connectable=False)
+
+        self.assertEqual(
+            self.ha.written_states(unique_id("last_seen")), [start.isoformat()]
+        )
+
+    def test_last_seen_advances_when_only_a_weaker_receiver_hears_it(self):
+        start = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        self.set_clock(start)
+        self.advertise(source="attic-proxy", rssi=-58)
+        self.set_clock(start + timedelta(seconds=61))
+        self.advertise(source="shelly", rssi=-79, connectable=False)
+
+        self.assertEqual(self.ha.history(TRAP_ADDRESS).source, "attic-proxy")
+        self.assertEqual(
+            self.ha.state(unique_id("last_seen")).state,
+            (start + timedelta(seconds=61)).isoformat(),
+        )
+
+    def test_last_seen_is_written_when_the_trap_comes_back(self):
+        start = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+        self.set_clock(start)
+        self.advertise()
+        self.assertTrue(self.ha.fire_unavailable(TRAP_ADDRESS))
+        self.set_clock(start + timedelta(seconds=10))
+        self.advertise()
+
+        self.assertEqual(
+            self.ha.state(unique_id("last_seen")).state,
+            (start + timedelta(seconds=10)).isoformat(),
+        )
 
     def test_signal_strength_shows_the_best_receiver(self):
         receivers = (

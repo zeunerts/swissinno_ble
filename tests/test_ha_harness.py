@@ -45,6 +45,58 @@ class FakeBluetoothStackTests(unittest.TestCase):
 
         self.assertEqual(seen, ["attic", "shelly", "attic"])
 
+    def test_advertisement_callback_runs_before_the_history_update(self):
+        seen = []
+        self.bt.async_register_advertisement_callback(
+            self.ha.hass,
+            lambda info: seen.append(self.ha.history(ADDRESS)),
+            ADDRESS,
+        )
+        first = self.ha.feed_advertisement(ADDRESS, READY, rssi=-60)
+        self.ha.feed_advertisement(ADDRESS, READY, rssi=-70)
+
+        self.assertEqual(seen, [None, first])
+
+    def test_work_deferred_from_advertisement_callback_sees_the_packet(self):
+        deferred = []
+
+        def on_advertisement(_info):
+            self.ha.hass.loop.call_soon(
+                lambda: deferred.append(self.ha.history(ADDRESS).rssi)
+            )
+
+        self.bt.async_register_advertisement_callback(
+            self.ha.hass, on_advertisement, ADDRESS
+        )
+        self.ha.feed_advertisement(ADDRESS, READY, rssi=-60)
+        self.ha.feed_advertisement(ADDRESS, READY, rssi=-70)
+
+        self.assertEqual(deferred, [-60, -70])
+
+    def test_weaker_receiver_waits_for_the_owner_to_be_durably_gone(self):
+        # habluetooth 7.1.2: without a tracked advertisement interval the
+        # owner is stale only after FALLBACK_MAXIMUM_STALE_ADVERTISEMENT_SECONDS.
+        self.ha.feed_advertisement(
+            ADDRESS, READY, source="attic", rssi=-58, received_at=1000.0
+        )
+        self.ha.feed_advertisement(
+            ADDRESS, CAUGHT, source="shelly", rssi=-79, received_at=1200.0
+        )
+        self.assertEqual(self.ha.history(ADDRESS).source, "attic")
+
+        self.ha.feed_advertisement(
+            ADDRESS, CAUGHT, source="shelly", rssi=-79, received_at=1901.0
+        )
+        self.assertEqual(self.ha.history(ADDRESS).source, "shelly")
+
+    def test_stronger_receiver_takes_over_only_beyond_the_threshold(self):
+        self.ha.feed_advertisement(ADDRESS, READY, source="shelly", rssi=-80)
+        self.ha.feed_advertisement(ADDRESS, READY, source="attic", rssi=-64)
+        self.assertEqual(self.ha.history(ADDRESS).source, "shelly")
+
+        self.ha.feed_advertisement(ADDRESS, READY, source="attic", rssi=-63)
+        self.assertEqual(self.ha.history(ADDRESS).source, "attic")
+
     def test_last_service_info_keeps_the_best_source(self):
         self.ha.feed_advertisement(ADDRESS, READY, source="attic", rssi=-58)
         self.ha.feed_advertisement(ADDRESS, CAUGHT, source="shelly", rssi=-79)

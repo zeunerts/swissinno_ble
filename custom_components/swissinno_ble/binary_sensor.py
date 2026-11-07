@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from time import monotonic
 
@@ -24,8 +26,9 @@ from .const import (
     legacy_unique_ids,
     normalized_address,
 )
+from .battery import BatteryStabilizer
 from .coordinator import TrapObservation, TrapObservationCoordinator
-from .decoder import decode_frame
+from .decoder import DecodedTrapFrame, decode_frame
 from .entity import PublishWhenAdded
 from .freshness import is_fresh_advertisement
 
@@ -43,30 +46,38 @@ async def async_setup_entry(
     entity_registry = er.async_get(hass)
     coordinator: TrapObservationCoordinator = hass.data[DOMAIN][DATA_COORDINATOR]
     accept_after = monotonic()
+    # Per Trap: the latest observation, the receive time of the arbitrated
+    # advertisement it came from, and the deferred liveness tick.
+    observations: dict[str, TrapObservation] = {}
+    processed_at: dict[str, float] = {}
+    battery_stabilizers: dict[str, BatteryStabilizer] = {}
+    pending_ticks: dict[str, asyncio.Handle] = {}
 
     @callback
-    def handle_advertisement(service_info: BluetoothServiceInfoBleak) -> None:
-        """Publish Status, battery, signal strength and Last seen of a Trap."""
-        payload = service_info.manufacturer_data.get(MANUFACTURER_ID)
-        if payload is None:
-            return
-        frame = decode_frame(payload)
-        if not frame:
-            return
+    def publish_advertisement(
+        service_info: BluetoothServiceInfoBleak, frame: DecodedTrapFrame
+    ) -> None:
+        """Publish Status, battery, signal strength and Last seen of a Trap.
 
+        ``service_info`` must be Home Assistant's arbitrated advertisement: the
+        best receiver's latest one, so its signal strength is the best
+        receiver's and its Status is never older than one already published.
+        """
         trap_id = normalized_address(service_info.address)
-        rssi = _signal_strength(hass, service_info)
+        processed_at[trap_id] = service_info.time
+        payload = service_info.manufacturer_data[MANUFACTURER_ID]
 
         _LOGGER.debug(
             "Trap %s (%s): status=0x%02X, tripped=%s, RSSI=%s dBm, "
-            "battery=%s V, manufacturer_payload=%s",
+            "battery=%s V, manufacturer_payload=%s, source=%s",
             trap_id,
             frame.model,
             frame.status,
             frame.is_tripped,
-            rssi,
+            service_info.rssi,
             frame.battery_volts,
             payload.hex(" ").upper(),
+            service_info.source,
         )
 
         if trap_id in sensors:
@@ -78,19 +89,65 @@ async def async_setup_entry(
             sensors[trap_id] = entity
             async_add_entities([entity])
 
+        # Battery readings can briefly be invalid during startup or switching.
+        # Keep the last stable value until two consecutive readings agree.
+        stabilizer = battery_stabilizers.setdefault(trap_id, BatteryStabilizer())
+        battery_v = stabilizer.update(frame.battery_volts)
+        if battery_v is None and (previous := observations.get(trap_id)):
+            battery_v = previous.battery_v
+
         # Cache before publishing so sensor setup can safely finish after the
         # synchronous Bluetooth history replay performed during registration.
-        coordinator.update(
-            trap_id,
-            TrapObservation(
-                rssi=rssi,
-                battery_v=frame.battery_volts,
-                legacy_trap_ids=frame.legacy_trap_ids,
-                model=frame.model,
-                last_seen=datetime.now(UTC),
-            ),
-            is_tripped=frame.is_tripped,
+        observation = TrapObservation(
+            rssi=service_info.rssi,
+            battery_v=battery_v,
+            legacy_trap_ids=frame.legacy_trap_ids,
+            model=frame.model,
+            last_seen=datetime.now(UTC),
         )
+        observations[trap_id] = observation
+        coordinator.update(trap_id, observation, is_tripped=frame.is_tripped)
+
+    @callback
+    def handle_advertisement(service_info: BluetoothServiceInfoBleak) -> None:
+        """Liveness tick: one advertisement from the Trap via any receiver.
+
+        Home Assistant calls this once per receiver per packet, before it
+        arbitrates between receivers and updates its history, so the values
+        are read from that history once this packet has been handled.
+        """
+        trap_id = normalized_address(service_info.address)
+        if trap_id not in pending_ticks:
+            pending_ticks[trap_id] = hass.loop.call_soon(
+                handle_tick, service_info.address
+            )
+
+    @callback
+    def handle_tick(address: str) -> None:
+        trap_id = normalized_address(address)
+        pending_ticks.pop(trap_id, None)
+        best = bluetooth.async_last_service_info(hass, address, connectable=False)
+        if (
+            best is not None
+            and best.time > processed_at.get(trap_id, float("-inf"))
+            and (frame := _trap_frame(best)) is not None
+        ):
+            publish_advertisement(best, frame)
+            return
+
+        # Only a receiver that lost arbitration heard it: the Trap is alive.
+        if (previous := observations.get(trap_id)) is not None:
+            observation = replace(previous, last_seen=datetime.now(UTC))
+            observations[trap_id] = observation
+            coordinator.update(trap_id, observation)
+
+    @callback
+    def cancel_pending_ticks() -> None:
+        for handle in pending_ticks.values():
+            handle.cancel()
+        pending_ticks.clear()
+
+    entry.async_on_unload(cancel_pending_ticks)
 
     @callback
     def track_trap(service_info: BluetoothServiceInfoBleak, frame) -> None:
@@ -141,16 +198,12 @@ async def async_setup_entry(
     @callback
     def detection_callback(service_info: BluetoothServiceInfoBleak, change):
         """Discover Traps from changed advertisements."""
-        payload = service_info.manufacturer_data.get(MANUFACTURER_ID)
-        if payload is None:
-            return
-        frame = decode_frame(payload)
-        if not frame:
+        if (frame := _trap_frame(service_info)) is None:
             return
 
         trap_id = normalized_address(service_info.address)
         if trap_id in known_traps:
-            # The every-advertisement callback already handled this one.
+            # The liveness tick handles this one.
             return
         known_traps.add(trap_id)
         track_trap(service_info, frame)
@@ -163,8 +216,9 @@ async def async_setup_entry(
             return
 
         # The every-advertisement callback was registered after this
-        # advertisement arrived, so handle it here once.
-        handle_advertisement(service_info)
+        # advertisement arrived, so handle it here once. Home Assistant calls
+        # this after updating its history, so it is the arbitrated one.
+        publish_advertisement(service_info, frame)
 
     cancel_callback = async_register_callback(
         hass,
@@ -178,19 +232,12 @@ async def async_setup_entry(
     _LOGGER.info("SWISSINNO BLE: Bluetooth scanner callback registered.")
 
 
-def _signal_strength(
-    hass: HomeAssistant, service_info: BluetoothServiceInfoBleak
-) -> int | None:
-    """Return the Trap's signal strength at the best receiver.
-
-    Home Assistant arbitrates between receivers and keeps the winner's latest
-    advertisement as the last service info; the packet's own RSSI belongs to
-    whichever receiver happened to hear it.
-    """
-    best = bluetooth.async_last_service_info(
-        hass, service_info.address, connectable=False
-    )
-    return best.rssi if best is not None else service_info.rssi
+def _trap_frame(service_info: BluetoothServiceInfoBleak) -> DecodedTrapFrame | None:
+    """Decode the Trap advertisement, or None if it is not one."""
+    payload = service_info.manufacturer_data.get(MANUFACTURER_ID)
+    if payload is None:
+        return None
+    return decode_frame(payload)
 
 
 class SwissinnoTrapSensor(PublishWhenAdded, BinarySensorEntity):

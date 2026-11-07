@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -15,12 +15,15 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
-from .battery import BatteryStabilizer
 from .const import DATA_COORDINATOR, DOMAIN, entity_unique_id, legacy_unique_ids
 from .coordinator import TrapObservation, TrapObservationCoordinator
 from .entity import PublishWhenAdded
 
 _LOGGER = logging.getLogger(__name__)
+
+# A Trap advertises several times a second through every receiver; writing
+# each Last seen would add a recorder row every time.
+LAST_SEEN_WRITE_INTERVAL = timedelta(seconds=60)
 
 
 async def async_setup_entry(
@@ -30,11 +33,11 @@ async def async_setup_entry(
     _LOGGER.info("SWISSINNO BLE: Initializing battery + RSSI sensors")
 
     battery_sensors: dict[str, SwissinnoBatterySensor] = {}
-    battery_stabilizers: dict[str, BatteryStabilizer] = {}
     rssi_sensors: dict[str, SwissinnoRSSISensor] = {}
     last_seen_sensors: dict[str, SwissinnoLastSeenSensor] = {}
     last_triggered_sensors: dict[str, SwissinnoLastTriggeredSensor] = {}
     trigger_count_sensors: dict[str, SwissinnoTriggerCountSensor] = {}
+    unavailable_traps: set[str] = set()
     entity_registry = er.async_get(hass)
     coordinator: TrapObservationCoordinator = hass.data[DOMAIN][DATA_COORDINATOR]
 
@@ -44,16 +47,17 @@ async def async_setup_entry(
         observation: TrapObservation,
     ) -> None:
         if not observation.available:
+            unavailable_traps.add(trap_id)
             if trap_id in battery_sensors:
                 battery_sensors[trap_id].set_unavailable()
             if trap_id in rssi_sensors:
                 rssi_sensors[trap_id].set_unavailable()
             return
+        came_back = trap_id in unavailable_traps
+        unavailable_traps.discard(trap_id)
 
-        # Battery readings can briefly be invalid during startup or switching.
-        # Keep the last published value until two consecutive readings agree.
-        stabilizer = battery_stabilizers.setdefault(trap_id, BatteryStabilizer())
-        stable_battery_v = stabilizer.update(observation.battery_v)
+        # The binary_sensor platform publishes only stable battery readings.
+        stable_battery_v = observation.battery_v
         if stable_battery_v is not None:
             if trap_id in battery_sensors:
                 battery_sensors[trap_id].update_value(stable_battery_v)
@@ -92,7 +96,9 @@ async def async_setup_entry(
         # becomes unavailable, so users can see when it was last received.
         if observation.last_seen is not None:
             if trap_id in last_seen_sensors:
-                last_seen_sensors[trap_id].update_value(observation.last_seen)
+                last_seen_sensors[trap_id].update_value(
+                    observation.last_seen, came_back=came_back
+                )
             else:
                 sensor = SwissinnoLastSeenSensor(
                     trap_id, observation.last_seen, observation.model
@@ -238,7 +244,14 @@ class SwissinnoLastSeenSensor(PublishWhenAdded, SensorEntity):
         self._attr_native_value = last_seen
         self._attr_device_info = _device_info(trap_id, model)
 
-    def update_value(self, last_seen: datetime) -> None:
+    def update_value(self, last_seen: datetime, *, came_back: bool = False) -> None:
+        """Write Last seen at most once a minute, unless the Trap came back."""
+        if (
+            self._added
+            and not came_back
+            and last_seen - self._attr_native_value < LAST_SEEN_WRITE_INTERVAL
+        ):
+            return
         self._attr_native_value = last_seen
         self._publish_state()
 

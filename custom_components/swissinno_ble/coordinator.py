@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 @dataclass(frozen=True)
 class TrapObservation:
-    """Values decoded from one real Bluetooth advertisement."""
+    """The latest values of a Trap; battery_v is the last stable reading."""
 
     rssi: int | None
     battery_v: float | None

@@ -2,6 +2,7 @@
 
 import logging
 
+from bleak.exc import BleakError
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
     establish_connection,
@@ -29,11 +30,18 @@ async def async_reset_trap(hass, address: str) -> None:
             translation_placeholders={"address": normalized},
         )
 
-    client = await establish_connection(
-        BleakClientWithServiceCache,
-        device,
-        device.name or normalized,
-    )
+    try:
+        client = await establish_connection(
+            BleakClientWithServiceCache,
+            device,
+            device.name or normalized,
+        )
+    except (BleakError, TimeoutError) as err:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="reset_connection_failed",
+            translation_placeholders={"address": normalized, "error": str(err)},
+        ) from err
 
     try:
         characteristic = client.services.get_characteristic(RESET_CHARACTERISTIC_UUID)

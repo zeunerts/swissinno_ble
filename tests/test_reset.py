@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
-from ha_harness import HomeAssistantError
+from ha_harness import BleakError, HomeAssistantError
 
 INTEGRATION_DIR = Path(__file__).parents[1] / "custom_components" / "swissinno_ble"
 PACKAGE = "swissinno_reset_test"
@@ -40,6 +40,9 @@ class ResetHelperTests(unittest.TestCase):
         )
         sys.modules["homeassistant.exceptions"].HomeAssistantError = HomeAssistantError
         sys.modules["bleak_retry_connector"] = connector
+        sys.modules["bleak"] = types.ModuleType("bleak")
+        sys.modules["bleak.exc"] = types.ModuleType("bleak.exc")
+        sys.modules["bleak.exc"].BleakError = BleakError
 
         package = types.ModuleType(PACKAGE)
         package.__path__ = [str(INTEGRATION_DIR)]

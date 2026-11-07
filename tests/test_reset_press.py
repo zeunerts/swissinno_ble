@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
-from ha_harness import HomeAssistantError, HomeAssistantHarness
+from ha_harness import BleakError, HomeAssistantError, HomeAssistantHarness
 
 TRAP_ADDRESS = "C8:AE:DC:73:80:48"
 RESET_BUTTON = "swissinno_trap_c8aedc738048_reset"
@@ -72,6 +72,20 @@ class ResetPressTests(unittest.TestCase):
         )
         self.assertIn(TRAP_ADDRESS, english_message(raised.exception))
         self.ha.connector.establish_connection.assert_not_awaited()
+
+    def test_connection_failure_raises_readable_error(self):
+        self.advertise()
+        self.ha.connector.establish_connection.side_effect = BleakError(
+            "No backend with an available connection slot"
+        )
+
+        with self.assertRaises(HomeAssistantError) as raised:
+            self.ha.press(RESET_BUTTON)
+
+        self.assertEqual(raised.exception.translation_key, "reset_connection_failed")
+        message = english_message(raised.exception)
+        self.assertIn(TRAP_ADDRESS, message)
+        self.assertIn("No backend with an available connection slot", message)
 
 
 if __name__ == "__main__":

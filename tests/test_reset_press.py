@@ -1,11 +1,17 @@
 """Behaviour tests: pressing Reset on the real button platform."""
 
+import asyncio
 import json
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
-from ha_harness import BleakError, HomeAssistantError, HomeAssistantHarness
+from ha_harness import (
+    BleakError,
+    HomeAssistantError,
+    HomeAssistantHarness,
+    ServiceValidationError,
+)
 
 TRAP_ADDRESS = "C8:AE:DC:73:80:48"
 RESET_BUTTON = "swissinno_trap_c8aedc738048_reset"
@@ -134,6 +140,48 @@ class ResetPressTests(unittest.TestCase):
         self.ha.press(RESET_BUTTON)
 
         self.client.write_gatt_char.assert_awaited_once()
+
+    def test_second_press_during_running_reset_is_refused(self):
+        self.advertise()
+        connected = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_connect(*_args, **_kwargs):
+            connected.set()
+            await release.wait()
+            return self.client
+
+        connect = self.ha.connector.establish_connection
+        connect.side_effect = slow_connect
+        button = self.ha.entity(RESET_BUTTON)
+
+        async def press_twice():
+            first = asyncio.ensure_future(button.async_press())
+            await connected.wait()
+            try:
+                with self.assertRaises(ServiceValidationError) as raised:
+                    await asyncio.wait_for(button.async_press(), timeout=1)
+            finally:
+                release.set()
+                await first
+            return raised.exception
+
+        refused = self.ha.run(press_twice())
+
+        self.assertEqual(refused.translation_key, "reset_in_progress")
+        self.assertIn("already in progress", english_message(refused))
+        connect.assert_awaited_once()
+        self.client.write_gatt_char.assert_awaited_once()
+
+    def test_reset_can_run_again_after_a_failed_reset(self):
+        self.advertise()
+        self.client.write_gatt_char.side_effect = [BleakError("Disconnected"), None]
+
+        with self.assertRaises(HomeAssistantError):
+            self.ha.press(RESET_BUTTON)
+        self.ha.press(RESET_BUTTON)
+
+        self.assertEqual(self.client.write_gatt_char.await_count, 2)
 
 
 if __name__ == "__main__":

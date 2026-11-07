@@ -62,6 +62,9 @@
     },
     "reset_characteristic_not_writable": {
       "message": "The Reset characteristic of Trap {address} is not writable (properties: {properties})."
+    },
+    "reset_in_progress": {
+      "message": "A Reset is already in progress for this Trap."
     }
   }
 }

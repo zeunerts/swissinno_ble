@@ -54,7 +54,7 @@ async def async_setup_entry(
             return
 
         trap_id = normalized_address(service_info.address)
-        rssi = service_info.rssi
+        rssi = _signal_strength(hass, service_info)
 
         _LOGGER.debug(
             "Trap %s (%s): status=0x%02X, tripped=%s, RSSI=%s dBm, "
@@ -175,6 +175,21 @@ async def async_setup_entry(
     entry.async_on_unload(cancel_callback)
 
     _LOGGER.info("SWISSINNO BLE: Bluetooth scanner callback registered.")
+
+
+def _signal_strength(
+    hass: HomeAssistant, service_info: BluetoothServiceInfoBleak
+) -> int | None:
+    """Return the Trap's signal strength at the best receiver.
+
+    Home Assistant arbitrates between receivers and keeps the winner's latest
+    advertisement as the last service info; the packet's own RSSI belongs to
+    whichever receiver happened to hear it.
+    """
+    best = bluetooth.async_last_service_info(
+        hass, service_info.address, connectable=False
+    )
+    return best.rssi if best is not None else service_info.rssi
 
 
 class SwissinnoTrapSensor(BinarySensorEntity):

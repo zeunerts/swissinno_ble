@@ -60,6 +60,18 @@ class BluetoothHistoryTests(unittest.TestCase):
 
         self.assertGreater(self.ha.state(unique_id("last_seen")).state, first)
 
+    def test_signal_strength_shows_the_best_receiver(self):
+        receivers = (
+            ("shelly", -79, False),
+            ("attic-proxy", -58, True),
+            ("hall-proxy", -86, True),
+        )
+        for _ in range(3):
+            for source, rssi, connectable in receivers:
+                self.advertise(source=source, rssi=rssi, connectable=connectable)
+
+        self.assertEqual(self.ha.state(unique_id("rssi")).state, "-58")
+
 
 if __name__ == "__main__":
     unittest.main()

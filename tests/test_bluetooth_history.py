@@ -73,6 +73,34 @@ class BluetoothHistoryTests(unittest.TestCase):
 
         self.assertEqual(self.ha.state(unique_id("rssi")).state, "-58")
 
+    def test_signal_strength_shows_the_latest_packet(self):
+        self.advertise(rssi=-58)
+        self.advertise(rssi=-64)
+
+        self.assertEqual(self.ha.state(unique_id("rssi")).state, "-64")
+
+    def test_two_receivers_hearing_one_packet_do_not_confirm_battery(self):
+        self.advertise(source="attic-proxy", rssi=-58)
+        self.advertise(source="shelly", rssi=-79, connectable=False)
+
+        with self.assertRaises(KeyError):
+            self.ha.entity(unique_id("battery"))
+
+        self.advertise(source="attic-proxy", rssi=-58)
+
+        self.assertEqual(self.ha.state(unique_id("battery")).state, "3.08")
+
+    def test_late_caught_packet_from_weaker_receiver_after_reset(self):
+        # A batching receiver (e.g. Shelly) can deliver a buffered Caught
+        # packet after the Trap was Reset and is advertising Ready again.
+        self.advertise(CONNECT_READY)
+        self.advertise(CONNECT_CAUGHT)
+        self.advertise(CONNECT_READY)
+        self.advertise(CONNECT_CAUGHT, source="shelly", rssi=-79, connectable=False)
+
+        self.assertEqual(self.ha.state(unique_id()).state, "off")  # Ready
+        self.assertEqual(self.ha.state(unique_id("trigger_count")).state, "1")
+
     def test_silent_trap_goes_unavailable_and_comes_back(self):
         self.advertise()
         self.advertise()

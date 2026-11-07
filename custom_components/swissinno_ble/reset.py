@@ -7,6 +7,9 @@ from bleak_retry_connector import (
     establish_connection,
 )
 from homeassistant.components.bluetooth import async_ble_device_from_address
+from homeassistant.exceptions import HomeAssistantError
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +23,11 @@ async def async_reset_trap(hass, address: str) -> None:
 
     device = async_ble_device_from_address(hass, normalized, connectable=True)
     if device is None:
-        raise RuntimeError(f"Bluetooth device {normalized} not found")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="reset_no_connectable_device",
+            translation_placeholders={"address": normalized},
+        )
 
     client = await establish_connection(
         BleakClientWithServiceCache,

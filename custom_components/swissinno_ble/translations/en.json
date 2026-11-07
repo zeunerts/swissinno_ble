@@ -46,5 +46,10 @@
         "name": "Trigger count"
       }
     }
+  },
+  "exceptions": {
+    "reset_no_connectable_device": {
+      "message": "No connectable Bluetooth receiver can reach Trap {address}. Move the Trap closer to a Bluetooth proxy or check that your proxies are connected."
+    }
   }
 }

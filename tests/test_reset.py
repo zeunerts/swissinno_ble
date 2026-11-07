@@ -8,9 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
-RESET_PATH = (
-    Path(__file__).parents[1] / "custom_components" / "swissinno_ble" / "reset.py"
-)
+from ha_harness import BleakError, HomeAssistantError
+
+INTEGRATION_DIR = Path(__file__).parents[1] / "custom_components" / "swissinno_ble"
+PACKAGE = "swissinno_reset_test"
 
 
 class ResetHelperTests(unittest.TestCase):
@@ -34,11 +35,25 @@ class ResetHelperTests(unittest.TestCase):
             "homeassistant.components"
         )
         sys.modules["homeassistant.components.bluetooth"] = bluetooth
+        sys.modules["homeassistant.exceptions"] = types.ModuleType(
+            "homeassistant.exceptions"
+        )
+        sys.modules["homeassistant.exceptions"].HomeAssistantError = HomeAssistantError
         sys.modules["bleak_retry_connector"] = connector
+        sys.modules["bleak"] = types.ModuleType("bleak")
+        sys.modules["bleak.exc"] = types.ModuleType("bleak.exc")
+        sys.modules["bleak.exc"].BleakError = BleakError
 
-        spec = importlib.util.spec_from_file_location("swissinno_reset", RESET_PATH)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        package = types.ModuleType(PACKAGE)
+        package.__path__ = [str(INTEGRATION_DIR)]
+        sys.modules[PACKAGE] = package
+        for name in ("const", "reset"):
+            spec = importlib.util.spec_from_file_location(
+                f"{PACKAGE}.{name}", INTEGRATION_DIR / f"{name}.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
         return module, connector, client, characteristic
 
     def test_prefers_write_without_response(self):

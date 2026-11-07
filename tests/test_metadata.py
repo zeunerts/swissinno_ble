@@ -168,12 +168,20 @@ class MetadataTests(unittest.TestCase):
         english = json.loads(
             (translation_dir / "en.json").read_text(encoding="utf-8")
         )
-        expected_keys = flatten_keys(english)
+        # Error messages are English only; other languages fall back to it.
+        expected_keys = {
+            key for key in flatten_keys(english) if not key.startswith("exceptions.")
+        }
         for language in expected_states:
             translations = json.loads(
                 (translation_dir / f"{language}.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(flatten_keys(translations), expected_keys, language)
+            keys = {
+                key
+                for key in flatten_keys(translations)
+                if not key.startswith("exceptions.")
+            }
+            self.assertEqual(keys, expected_keys, language)
 
     def test_sensor_platform_replays_late_observations(self):
         binary_source = (INTEGRATION / "binary_sensor.py").read_text(

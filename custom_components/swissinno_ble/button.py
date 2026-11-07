@@ -1,5 +1,6 @@
 """Button platform for SWISSINNO BLE traps."""
 
+import asyncio
 import logging
 
 from homeassistant.components.bluetooth import (
@@ -10,6 +11,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -105,6 +107,7 @@ class SwissinnoResetButton(ButtonEntity):
         self._hass = hass
         self._address = address
         self._trap_id = trap_id
+        self._reset_lock = asyncio.Lock()
 
         self._attr_unique_id = entity_unique_id(trap_id, "reset")
         self._attr_icon = "mdi:restart"
@@ -117,4 +120,12 @@ class SwissinnoResetButton(ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        await async_reset_trap(self._hass, self._address)
+        # One Reset at a time per Trap, so presses never hold extra proxy
+        # connection slots.
+        if self._reset_lock.locked():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="reset_in_progress",
+            )
+        async with self._reset_lock:
+            await async_reset_trap(self._hass, self._address)

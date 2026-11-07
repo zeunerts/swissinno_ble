@@ -343,6 +343,14 @@ class HomeAssistantError(Exception):
         self.translation_placeholders = translation_placeholders
 
 
+class ServiceValidationError(HomeAssistantError):
+    pass
+
+
+class BleakError(Exception):
+    """Stands in for ``bleak.exc.BleakError``."""
+
+
 @dataclass(frozen=True)
 class WrittenState:
     entity_id: str
@@ -650,8 +658,12 @@ class HomeAssistantHarness:
                 "homeassistant.core", HomeAssistant=FakeHass, callback=_callback
             ),
             "homeassistant.exceptions": _module(
-                "homeassistant.exceptions", HomeAssistantError=HomeAssistantError
+                "homeassistant.exceptions",
+                HomeAssistantError=HomeAssistantError,
+                ServiceValidationError=ServiceValidationError,
             ),
+            "bleak": _module("bleak"),
+            "bleak.exc": _module("bleak.exc", BleakError=BleakError),
             "homeassistant.helpers": helpers,
             "homeassistant.helpers.entity": helpers_entity,
             "homeassistant.helpers.entity_registry": er,

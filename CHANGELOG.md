@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.31
+
+Fork release (zeunerts/swissinno_ble, forked from unigas/swissinno_ble).
+
+- Fixed Reset from Home Assistant: the integration no longer clears the Trap
+  from Home Assistant's Bluetooth history after every advertisement, so Reset
+  can find the Trap and connect through a Bluetooth proxy.
+- Fixed offline detection: Status, battery and signal strength now become
+  unavailable when a Trap stops advertising, and recover on the next one.
+- Last seen updates on every advertisement through Home Assistant's
+  every-advertisement callback. Signal strength shows the best receiver.
+- Requires Home Assistant 2026.10.0 or newer.
+- Reset failures show a readable English error instead of a server error, and
+  a second press while a Reset is running is refused.
+- Advertisements that arrive before entities are added no longer raise errors;
+  the latest values appear once the entities are added.
+- Legacy unique-ID migration runs only the first time a Trap is seen.
+- Decoder cleanups: shared constants, no unreachable trap-id branch.
+- Added a fake Bluetooth stack test harness covering these behaviours.
+
 ## 1.0.30
 
 - Corrected Electronic SuperCat battery decoding to use its battery-related

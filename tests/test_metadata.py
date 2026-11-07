@@ -35,7 +35,7 @@ class MetadataTests(unittest.TestCase):
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
         self.assertEqual(manifest["integration_type"], "hub")
-        self.assertEqual(manifest["version"], "1.0.30")
+        self.assertEqual(manifest["version"], "1.0.31")
         self.assertIn("issue_tracker", manifest)
         self.assertIn("bluetooth_adapters", manifest["dependencies"])
         self.assertTrue((ROOT / "CHANGELOG.md").exists())

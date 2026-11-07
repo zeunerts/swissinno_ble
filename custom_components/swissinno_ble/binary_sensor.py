@@ -26,6 +26,7 @@ from .const import (
 )
 from .coordinator import TrapObservation, TrapObservationCoordinator
 from .decoder import decode_frame
+from .entity import PublishWhenAdded
 from .freshness import is_fresh_advertisement
 
 _LOGGER = logging.getLogger(__name__)
@@ -192,7 +193,7 @@ def _signal_strength(
     return best.rssi if best is not None else service_info.rssi
 
 
-class SwissinnoTrapSensor(BinarySensorEntity):
+class SwissinnoTrapSensor(PublishWhenAdded, BinarySensorEntity):
     """Representation of a SWISSINNO BLE trap."""
 
     _attr_has_entity_name = True
@@ -220,10 +221,10 @@ class SwissinnoTrapSensor(BinarySensorEntity):
     def update_state(self, tripped: bool | None):
         self._state = tripped
         self._attr_available = True
-        self.async_write_ha_state()
+        self._publish_state()
 
     @callback
     def set_unavailable(self) -> None:
         """Mark the trap unavailable when advertisements stop."""
         self._attr_available = False
-        self.async_write_ha_state()
+        self._publish_state()

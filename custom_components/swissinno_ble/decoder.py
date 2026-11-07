@@ -132,9 +132,7 @@ def decode_frame(payload: bytes) -> DecodedTrapFrame | None:
     # ----------------------------------------------------------------------
     version = -1
 
-    trap_id = (
-        "".join(f"{b:02X}" for b in payload[2:6]) if len(payload) >= 6 else "UNKNOWN"
-    )
+    trap_id = _hex_id(payload[2:6])
 
     status = payload[0]
 
